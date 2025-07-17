@@ -7,11 +7,26 @@ interface Topic {
   name: string;
 }
 
+// Hàm upload ảnh lên Cloudinary
+const uploadToCloudinary = async (file: File): Promise<string> => {
+  const url = 'https://api.cloudinary.com/v1_1/duqmsoxk4/image/upload'; // Thay <cloud_name> của bạn
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('upload_preset', 'emotional'); // Thay <upload_preset> của bạn
+  const res = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+  const data = await res.json();
+  return data.secure_url;
+};
+
 const ContributeSituation: React.FC = () => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [topicId, setTopicId] = useState('');
   const [context, setContext] = useState('');
   const [question, setQuestion] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
@@ -30,11 +45,16 @@ const ContributeSituation: React.FC = () => {
     }
     setLoading(true);
     try {
-      await contributeSituation({ topic_id: Number(topicId), context, question });
+      let image_url = '';
+      if (imageFile) {
+        image_url = await uploadToCloudinary(imageFile);
+      }
+      await contributeSituation({ topic_id: Number(topicId), context, question, image_url });
       setSuccess('Đóng góp của bạn đã được ghi nhận!');
       setContext('');
       setQuestion('');
       setTopicId('');
+      setImageFile(null);
     } catch (err: any) {
       setError('Có lỗi xảy ra, vui lòng thử lại.');
     } finally {
@@ -82,6 +102,20 @@ const ContributeSituation: React.FC = () => {
             minRows={2}
             sx={{ mb: 2 }}
           />
+          <Button
+            variant="outlined"
+            component="label"
+            fullWidth
+            sx={{ mb: 2 }}
+          >
+            {imageFile ? imageFile.name : "Chọn ảnh minh họa (tùy chọn)"}
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={e => setImageFile(e.target.files?.[0] || null)}
+            />
+          </Button>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
           <Button type="submit" variant="contained" color="primary" fullWidth disabled={loading} sx={{ fontWeight: 600, py: 1.2 }}>

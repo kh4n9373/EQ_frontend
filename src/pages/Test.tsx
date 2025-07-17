@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { getSituations, analyzeAnswer, getTopics } from '../api/eqApi';
 
@@ -32,14 +32,19 @@ const Test: React.FC = () => {
   const { topicId } = useParams<{ topicId: string }>();
   const [situations, setSituations] = useState<Situation[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
-  const [current, setCurrent] = useState(0);
-  const [answer, setAnswer] = useState('');
   const [answers, setAnswers] = useState<string[]>([]);
-  const [showGrid, setShowGrid] = useState(false);
-  const [selectedBox, setSelectedBox] = useState<string | null>(null);
   const [results, setResults] = useState<(AnalysisResult | null)[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Linked list state
+  const [linkedList, setLinkedList] = useState<any[]>([]); // [Q1, null, Q2, null, ... , Q5, null, 'xem_ket_qua']
+  const [currentIndex, setCurrentIndex] = useState(0); // index trên linkedList
+  const [answer, setAnswer] = useState('');
+  const [selectedBox, setSelectedBox] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const [sendHover, setSendHover] = useState(false);
+  const finalizedTranscript = useRef('');
 
   useEffect(() => {
     setLoading(true);
@@ -51,36 +56,72 @@ const Test: React.FC = () => {
         setSituations(situationsRes.data);
         setAnswers(Array(situationsRes.data.length).fill(''));
         setResults(Array(situationsRes.data.length).fill(null));
-        setCurrent(0);
+        // Tạo linkedList: [Q1, null, Q2, null, ..., Q5, null, 'xem_ket_qua']
+        const arr = [];
+        for (let i = 0; i < situationsRes.data.length; i++) {
+          arr.push(i); // index câu hỏi
+          arr.push(null); // kết quả
+        }
+        arr.push('xem_ket_qua');
+        setLinkedList(arr);
+        setCurrentIndex(0);
         setTopics(topicsRes.data);
+        setAnswer('');
       })
       .catch(() => setError('Không thể tải dữ liệu.'))
       .finally(() => setLoading(false));
   }, [topicId]);
 
+  // Helper: next/prev bỏ qua null
+  const findNextIndex = (from: number, dir: 1 | -1) => {
+    let idx = from + dir;
+    while (idx >= 0 && idx < linkedList.length) {
+      // Nếu là null (chưa có kết quả), skip
+      if (linkedList[idx] !== null) return idx;
+      idx += dir;
+    }
+    return from; // không đi được nữa
+  };
+
   const handlePrev = () => {
-    if (current > 0) setCurrent(current - 1);
+    if (currentIndex === 0) return;
+    const prevIdx = findNextIndex(currentIndex, -1);
+    setCurrentIndex(prevIdx);
+    // Nếu là câu hỏi, setAnswer lại
+    if (typeof linkedList[prevIdx] === 'number') {
+      setAnswer(answers[linkedList[prevIdx]] || '');
+    }
   };
   const handleNext = () => {
-    if (current < situations.length - 1) setCurrent(current + 1);
-    // Nếu là câu cuối, có thể chuyển sang trang kết quả
+    if (currentIndex === linkedList.length - 1) return;
+    const nextIdx = findNextIndex(currentIndex, 1);
+    setCurrentIndex(nextIdx);
+    if (typeof linkedList[nextIdx] === 'number') {
+      setAnswer(answers[linkedList[nextIdx]] || '');
+    }
   };
   const handleSend = async () => {
     setLoading(true);
     setError('');
     try {
+      const qIdx = linkedList[currentIndex];
       const res = await analyzeAnswer({
-        situation_id: situations[current].id,
+        situation_id: situations[qIdx].id,
         answer_text: answer,
       });
       const newAnswers = [...answers];
-      newAnswers[current] = answer;
+      newAnswers[qIdx] = answer;
       setAnswers(newAnswers);
       const newResults = [...results];
-      newResults[current] = res.data;
+      newResults[qIdx] = res.data;
       setResults(newResults);
-      setShowGrid(true);
+      // Cập nhật linkedList: chèn kết quả vào vị trí null sau câu hỏi
+      const newLinkedList = [...linkedList];
+      newLinkedList[currentIndex + 1] = res.data;
+      setLinkedList(newLinkedList);
       setAnswer('');
+      // Tự động next sang grid điểm
+      setCurrentIndex(currentIndex + 1);
     } catch (err) {
       setError('Có lỗi khi gửi câu trả lời.');
     } finally {
@@ -88,6 +129,53 @@ const Test: React.FC = () => {
     }
   };
   const handleCloseOverlay = () => setSelectedBox(null);
+
+  // Voice recognition handler
+  const handleVoice = () => {
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      setError('Trình duyệt của bạn không hỗ trợ ghi âm giọng nói.');
+      return;
+    }
+    if (isRecording) {
+      // Stop
+      setIsRecording(false);
+      if (recognitionRef.current) recognitionRef.current.stop();
+    } else {
+      // Start
+      setError('');
+      setIsRecording(true);
+      finalizedTranscript.current = answer; // lưu lại phần đã có
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'vi-VN';
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.continuous = true;
+      recognition.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            final += transcript + ' ';
+          } else {
+            interim += transcript;
+          }
+        }
+        if (final) {
+          finalizedTranscript.current += final;
+        }
+        setAnswer(finalizedTranscript.current + interim);
+      };
+      recognition.onerror = (event: any) => {
+        setError('Lỗi ghi âm: ' + event.error);
+        setIsRecording(false);
+      };
+      // Không tự động stop khi onend, chỉ stop khi user bấm lại
+      recognitionRef.current = recognition;
+      recognition.start();
+    }
+  };
 
   const getOverallScore = (scores: { [key: string]: number }) => {
     const keys = ['self_awareness', 'empathy', 'self_regulation', 'communication', 'decision_making'];
@@ -97,13 +185,13 @@ const Test: React.FC = () => {
 
   const getOverallReasoning = (score: number) => {
     if (score < 3) {
-      return "EQ của bạn đang ở mức rất thấp. Có thể bạn gặp khó khăn trong việc nhận diện và điều tiết cảm xúc. Hãy bắt đầu bằng việc quan sát cảm xúc hàng ngày và học cách thấu hiểu người khác.";
+      return "EQ của bạn trong tình huống này là rất thấp. Có thể bạn gặp khó khăn trong việc nhận diện và điều tiết cảm xúc. Hãy bắt đầu bằng việc quan sát cảm xúc hàng ngày và học cách thấu hiểu người khác.";
     } else if (score < 6) {
-      return "EQ của bạn ở mức trung bình thấp. Bạn có tiềm năng để cải thiện, đặc biệt trong việc giao tiếp cảm xúc và kiểm soát phản ứng. Hãy thử rèn luyện qua các tình huống thực tế và phản hồi từ người xung quanh.";
+      return "EQ của bạn trong tình huống này hơi trung bình thấp. Bạn có tiềm năng để cải thiện, đặc biệt trong việc giao tiếp cảm xúc và kiểm soát phản ứng. Hãy thử rèn luyện qua các tình huống thực tế và phản hồi từ người xung quanh.";
     } else if (score < 8) {
-      return "EQ của bạn ở mức khá. Bạn có khả năng thấu hiểu và quản lý cảm xúc tốt trong phần lớn tình huống, nhưng vẫn còn một số điểm có thể phát triển để đạt mức xuất sắc.";
+      return "EQ của bạn trong tình huống này ở mức khá. Bạn có khả năng thấu hiểu và quản lý cảm xúc tốt trong phần lớn tình huống, nhưng vẫn còn một số điểm có thể phát triển để đạt mức xuất sắc.";
     } else {
-      return "Bạn có EQ rất cao! Khả năng đồng cảm, tự nhận thức và điều tiết cảm xúc của bạn thật ấn tượng. Hãy tiếp tục phát huy và lan tỏa sự tích cực này đến những người xung quanh.";
+      return "Bạn xử lý rất tốt trong tình huống này! Khả năng đồng cảm, tự nhận thức và điều tiết cảm xúc của bạn thật ấn tượng. Hãy tiếp tục phát huy và lan tỏa sự tích cực này đến những người xung quanh.";
     }
   };
 
@@ -118,12 +206,27 @@ const Test: React.FC = () => {
 
   const topicName = topics.length > 0 && topicId ? (topics.find(t => t.id === Number(topicId))?.name || '') : '';
 
+  // Enable nút xem kết quả nếu tất cả các kết quả đã có (không còn null trừ cuối)
+  const canViewSummary = linkedList.length > 1 && linkedList.slice(1, -1).every((v, i) => (i % 2 === 0 ? true : v !== null));
+
+  // Render
   if (loading) return <div style={{ textAlign: 'center', marginTop: 60 }}>Đang tải dữ liệu...</div>;
   if (error) return <div style={{ color: 'red', textAlign: 'center', marginTop: 60 }}>{error}</div>;
   if (!situations.length) return <div style={{ textAlign: 'center', marginTop: 60 }}>Không có tình huống nào cho chủ đề này.</div>;
 
-  const sit = situations[current];
-  const result = results[current];
+  // Lấy index câu hỏi hiện tại nếu là Q, hoặc kết quả nếu là grid
+  const node = linkedList[currentIndex];
+  let sit: Situation | null = null;
+  let result: AnalysisResult | null = null;
+  if (typeof node === 'number') {
+    sit = situations[node];
+    result = results[node];
+  } else if (node && typeof node === 'object') {
+    // node là kết quả
+    const qIdx = Math.floor((currentIndex - 1) / 2);
+    result = results[qIdx];
+    sit = situations[qIdx];
+  }
 
   return (
     <div style={{
@@ -131,19 +234,23 @@ const Test: React.FC = () => {
       background: '#ddd',
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'Quicksand, Nunito, Arial, sans-serif',
+      alignItems: 'flex-start',
+      justifyContent: 'flex-start',
+      fontFamily: 'K2D, Quicksand, Nunito, Arial, sans-serif',
       position: 'relative',
+      width: '90vw',
+      maxWidth: '100vw',
+      padding: '0 6vw',
     }}>
       {/* Navigation */}
-      <div style={{ width: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ width: '100%', maxWidth: '100vw', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
         <button
           onClick={handlePrev}
-          disabled={current === 0}
-          style={{ background: 'none', border: 'none', fontSize: 48, color: '#a00', cursor: 'pointer', opacity: current === 0 ? 0.3 : 1 }}
+          disabled={currentIndex === 0}
+          style={{ background: 'none', border: 'none', fontSize: 48, color: '#a00', cursor: 'pointer', opacity: currentIndex === 0 ? 0.3 : 1 }}
         >&#8592;</button>
-        <div style={{ fontWeight: 700, fontSize: 28, color: '#a00', border: '2px dashed #a00', borderRadius: 12, padding: '4px 32px', background: '#fff', letterSpacing: 1 }}>
+        <div style={{ fontWeight: 700, fontSize: 28, color: '#a00', border: '2px dashed #a00', borderRadius: 12, padding: '4px 32px', background: '#fff', letterSpacing: 1,
+          marginTop: 10, marginBottom: 32 }}>
           {loading
             ? <span style={{ color: '#aaa' }}>Đang tải...</span>
             : topicName
@@ -153,50 +260,154 @@ const Test: React.FC = () => {
         </div>
         <button
           onClick={handleNext}
-          disabled={current === situations.length - 1}
-          style={{ background: 'none', border: 'none', fontSize: 48, color: '#a00', cursor: 'pointer', opacity: current === situations.length - 1 ? 0.3 : 1 }}
+          disabled={currentIndex === linkedList.length - 1}
+          style={{ background: 'none', border: 'none', fontSize: 48, color: '#a00', cursor: 'pointer', opacity: currentIndex === linkedList.length - 1 ? 0.3 : 1 }}
         >&#8594;</button>
       </div>
-      {/* Main 2 box hoặc grid điểm */}
-      {!showGrid ? (
-        <div style={{ display: 'flex', gap: 24, width: 700 }}>
+      {/* Main content: Q, grid, hoặc xem_ket_qua */}
+      {node === 'xem_ket_qua' ? (
+        <div style={{ width: '100%', maxWidth: '100vw', textAlign: 'center', marginTop: 40 }}>
+          <button
+            disabled={!canViewSummary}
+            style={{ fontSize: 28, padding: '16px 48px', borderRadius: 16, background: canViewSummary ? '#6c3fc5' : '#ccc', color: '#fff', border: 'none', fontWeight: 700, cursor: canViewSummary ? 'pointer' : 'not-allowed', boxShadow: '2px 4px 12px #bbb', marginBottom: 24 }}
+            onClick={() => window.location.href = `/summary?topicId=${topicId}`}
+          >XEM KẾT QUẢ EQ</button>
+          {!canViewSummary && <div style={{ color: '#a00', marginTop: 12 }}>Bạn cần hoàn thành tất cả các câu hỏi để xem kết quả tổng hợp.</div>}
+        </div>
+      ) : typeof node === 'number' ? (
+        // Box nhập câu trả lời
+        <div style={{ display: 'flex', gap: '5vw', width: '100%', maxWidth: '100vw', minHeight: 420 }}>
           {/* Box tình huống */}
-          <div style={{ flex: 1, background: '#e6d6fa', borderRadius: 24, border: '4px solid #6c3fc5', padding: 24, minHeight: 260, boxShadow: '2px 4px 12px #bbb', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div style={{ color: 'green', fontSize: 22, fontWeight: 500, marginBottom: 16 }}>{sit.context}</div>
-            <div style={{ color: 'brown', fontSize: 22, fontWeight: 600 }}>{sit.question}</div>
+          <div style={{ flex: 1, background: '#e6d6fa', borderRadius: 24, border: '4px solid #6c3fc5', padding: '3vw', minHeight: 720, boxShadow: '2px 4px 12px #bbb', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0 }}>
+            <div style={{ color: 'green', fontSize: 24, fontWeight: 500, marginBottom: 18, whiteSpace: 'pre-line', fontFamily: 'K2D, Quicksand, Nunito, Arial, sans-serif' }}>{sit?.context}</div>
+            <div style={{ color: '#a00', fontSize: 24, fontWeight: 700, marginTop: 0, whiteSpace: 'pre-line', fontFamily: 'K2D, Quicksand, Nunito, Arial, sans-serif' }}>{sit?.question}</div>
           </div>
           {/* Box trả lời */}
-          <div style={{ flex: 1, background: '#cbe2fa', borderRadius: 24, border: '4px solid #223a7a', padding: 24, minHeight: 260, boxShadow: '2px 4px 12px #bbb', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-            <div style={{ color: '#223a7a', fontSize: 22, fontWeight: 500, marginBottom: 16 }}>Câu trả lời của bạn</div>
+          <div style={{ flex: 1, background: '#cbe2fa', borderRadius: 24, border: '4px solid #223a7a', padding: '3vw', minHeight: 720, boxShadow: '2px 4px 12px #bbb', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'stretch', position: 'relative', fontFamily: 'K2D, Quicksand, Nunito, Arial, sans-serif', minWidth: 0 }}>
+            <div style={{ color: '#223a7a', fontSize: 22, fontWeight: 600, marginBottom: 12, textAlign: 'left', fontFamily: 'K2D, Quicksand, Nunito, Arial, sans-serif' }}>Câu trả lời của bạn</div>
             <textarea
               value={answer}
               onChange={e => setAnswer(e.target.value)}
               placeholder="Nhập câu trả lời..."
-              style={{ width: '100%', minHeight: 80, fontSize: 20, borderRadius: 8, border: '2px solid #223a7a', padding: 8, marginBottom: 16, resize: 'vertical' }}
+              style={{
+                width: '100%',
+                minHeight: 90,
+                fontSize: 20,
+                borderRadius: 12,
+                border: 'none',
+                background: 'transparent',
+                padding: 10,
+                marginBottom: 0,
+                resize: 'vertical',
+                color: '#223a7a',
+                outline: 'none',
+                boxShadow: 'none',
+                fontFamily: 'K2D, Quicksand, Nunito, Arial, sans-serif',
+              }}
               disabled={loading}
             />
             {error && <div style={{ color: 'red', marginBottom: 8 }}>{error}</div>}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 16 }}>
-              {/* Icon ghi âm (chỉ là placeholder) */}
-              <button style={{ width: 48, height: 48, borderRadius: '50%', border: '2px solid #223a7a', background: '#fff', boxShadow: '2px 2px 6px #bbb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, cursor: 'pointer' }}>
-                <span role="img" aria-label="voice">🎤</span>
+            {/* Nút voice + send căn giữa dưới cùng */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 32, marginTop: 'auto', marginBottom: 0 }}>
+              {/* Icon sóng âm */}
+              <button
+                type="button"
+                onClick={handleVoice}
+                style={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: '50%',
+                  border: isRecording ? '2px solid #d32f2f' : '2px solid #223a7a',
+                  background: isRecording ? '#fff0f0' : '#fff',
+                  boxShadow: isRecording ? '0 0 0 4px #ffd6d6' : '2px 2px 6px #bbb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 28,
+                  cursor: 'pointer',
+                  padding: 0,
+                  transition: 'background 0.2s, border 0.2s, box-shadow 0.2s',
+                  outline: 'none',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = isRecording ? '#ffb3b3' : '#ffeaea';
+                  (e.currentTarget as HTMLButtonElement).style.border = '2px solid #d32f2f';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.background = isRecording ? '#fff0f0' : '#fff';
+                  (e.currentTarget as HTMLButtonElement).style.border = isRecording ? '2px solid #d32f2f' : '2px solid #223a7a';
+                }}
+              >
+                {/* SVG sóng âm */}
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="4" y="12" width="2" height="4" rx="1" fill={isRecording ? '#d32f2f' : '#223a7a'}/>
+                  <rect x="8" y="9" width="2" height="10" rx="1" fill={isRecording ? '#d32f2f' : '#223a7a'}/>
+                  <rect x="12" y="6" width="2" height="16" rx="1" fill={isRecording ? '#d32f2f' : '#223a7a'}/>
+                  <rect x="16" y="9" width="2" height="10" rx="1" fill={isRecording ? '#d32f2f' : '#223a7a'}/>
+                  <rect x="20" y="12" width="2" height="4" rx="1" fill={isRecording ? '#d32f2f' : '#223a7a'}/>
+                </svg>
               </button>
               {/* Nút gửi */}
               <button
                 onClick={handleSend}
                 disabled={loading || !answer.trim()}
-                style={{ width: 48, height: 48, borderRadius: '50%', border: '2px solid #223a7a', background: '#4da3ff', boxShadow: '2px 2px 6px #bbb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, cursor: loading || !answer.trim() ? 'not-allowed' : 'pointer', color: '#111', opacity: loading || !answer.trim() ? 0.5 : 1 }}
+                style={{
+                  width: 54,
+                  height: 54,
+                  borderRadius: '50%',
+                  border: sendHover && !(loading || !answer.trim()) ? '2px solid #1976d2' : '2px solid #223a7a',
+                  background: sendHover && !(loading || !answer.trim()) ? '#4da3ff' : '#fff',
+                  boxShadow: sendHover && !(loading || !answer.trim()) ? '0 0 0 4px #b3e0ff' : '2px 2px 6px #bbb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 32,
+                  cursor: loading || !answer.trim() ? 'not-allowed' : 'pointer',
+                  color: '#111',
+                  opacity: loading || !answer.trim() ? 0.5 : 1,
+                  padding: 0,
+                  transition: 'background 0.2s, border 0.2s, box-shadow 0.2s, transform 0.2s',
+                  position: 'relative',
+                  outline: 'none',
+                  transform: sendHover && !(loading || !answer.trim()) ? 'scale(1.08)' : 'scale(1)',
+                }}
+                onMouseEnter={() => setSendHover(true)}
+                onMouseLeave={() => setSendHover(false)}
               >
-                {loading ? <span role="img" aria-label="loading">⏳</span> : <span role="img" aria-label="send">➤</span>}
+                {loading ? (
+                  <span role="img" aria-label="loading">⏳</span>
+                ) : (
+                  // Tam giác đen, khi hover thì đổi sang trắng nếu nền xanh
+                  <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <polygon id="send-triangle" points="8,6 22,14 8,22" fill={sendHover && !(loading || !answer.trim()) ? '#fff' : '#111'} />
+                  </svg>
+                )}
               </button>
             </div>
           </div>
         </div>
       ) : (
-        <div style={{ width: 700, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: 24, marginTop: 16 }}>
+        // Grid điểm
+        <div style={{ width: '100%', maxWidth: '100vw', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(2, 1fr)', gap: '3vw', marginTop: 16, minHeight: 420 }}>
           {result ? EQ_KEYS.map((item, idx) => {
+            if (!result) return null; // guard cho chắc
             let score = result.scores[item.key];
-            let reasoning = result.reasoning[item.key];
+            // Tìm key reasoning phù hợp bằng cách kiểm tra từ khóa đặc trưng trong tên key
+            const reasoningKeys = Object.keys(result.reasoning || {});
+            const topicKeywords = {
+              self_awareness: 'awareness',
+              empathy: 'empathy',
+              self_regulation: 'regulation',
+              communication: 'communication',
+              decision_making: 'decision',
+              overall: 'overall',
+            };
+            let reasoning = "Không có nhận xét cho mục này.";
+            const keyword = topicKeywords[item.key as keyof typeof topicKeywords];
+            if (keyword) {
+              const foundKey = reasoningKeys.find(k => k.toLowerCase().includes(keyword));
+              if (foundKey) reasoning = result.reasoning[foundKey];
+            }
             if (item.key === 'overall') {
               score = getOverallScore(result.scores);
               reasoning = getOverallReasoning(score);
@@ -215,12 +426,13 @@ const Test: React.FC = () => {
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  height: 140,
+                  height: 350,
                   cursor: 'pointer',
                   position: 'relative',
                   transition: 'transform 0.25s cubic-bezier(.34,1.56,.64,1)',
                   zIndex: selectedBox === item.key ? 100 : 1,
                   transform: selectedBox === item.key ? 'scale(1.15)' : 'scale(1)',
+
                 }}
               >
                 <div style={{ fontSize: 22, fontWeight: 600, color: '#222', marginBottom: 8 }}>{item.label}</div>
