@@ -1,10 +1,19 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Paper } from '@mui/material';
 
-const Summary: React.FC = () => (
-  <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-    <Typography variant="h5" color="text.secondary">Tính năng này đang phát triển</Typography>
-  </Box>
-);
+const Summary: React.FC = () => {
+  return (
+    <Box sx={{ p: 3, maxWidth: 800, mx: 'auto' }}>
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h4" gutterBottom>
+          Phân tích kết quả
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Trang này sẽ hiển thị phân tích chi tiết về kết quả EQ test của bạn.
+        </Typography>
+      </Paper>
+    </Box>
+  );
+};
 
 export default Summary; 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography, Avatar, CircularProgress, Alert, Paper, Dialog, IconButton } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import { getContributedSituations } from '../api/eqApi';
+import CommentSection from '../components/CommentSection';
 
 interface UserShort {
   id: number;
@@ -46,8 +47,25 @@ const ContributedSituations: React.FC = () => {
   );
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f9f6f2', py: 6, px: { xs: 1, md: 0 }, fontFamily: 'Quicksand, Nunito, Arial, sans-serif', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <Typography variant="h4" align="center" sx={{ fontWeight: 700, mb: 4 }}>
+    <Box sx={{ 
+      minHeight: '100vh', 
+      bgcolor: 'background.default', 
+      py: 6, 
+      px: { xs: 1, md: 0 }, 
+      fontFamily: 'Quicksand, Nunito, Arial, sans-serif', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center' 
+    }}>
+      <Typography 
+        variant="h4" 
+        align="center" 
+        sx={{ 
+          fontWeight: 700, 
+          mb: 4,
+          color: 'text.primary'
+        }}
+      >
         Danh sách tình huống cộng đồng đóng góp
       </Typography>
       {loading ? (
@@ -61,17 +79,22 @@ const ContributedSituations: React.FC = () => {
       ) : (
         <Box sx={{ width: '100%', maxWidth: 540, mx: 'auto' }}>
           {sortedSituations.map(sit => (
-            <Paper key={sit.id} elevation={3} sx={{ mb: 4, borderRadius: 4, p: 2, bgcolor: '#fff' }}>
+            <Paper key={sit.id} elevation={3} sx={{ 
+              mb: 4, 
+              borderRadius: 4, 
+              p: 2, 
+              bgcolor: 'background.paper'
+            }}>
               {/* Header: Avatar, Name, Time */}
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <Avatar src={sit.user?.picture} alt={sit.user?.name} sx={{ mr: 1.5 }} />
                 <Box>
-                  <Typography sx={{ fontWeight: 600 }}>{sit.user?.name}</Typography>
+                  <Typography sx={{ fontWeight: 600, color: 'text.primary' }}>{sit.user?.name}</Typography>
                   <Typography variant="caption" color="text.secondary">{formatTime(sit.created_at)}</Typography>
                 </Box>
               </Box>
               {/* Content */}
-              <Typography variant="body1" sx={{ fontWeight: 500, mb: 1 }}>{sit.context}</Typography>
+              <Typography variant="body1" sx={{ fontWeight: 500, mb: 1, color: 'text.primary' }}>{sit.context}</Typography>
               <Typography variant="body2" color="primary" sx={{ mb: 1 }}><b>Câu hỏi mở:</b> {sit.question}</Typography>
               {/* Image (if any) */}
               {sit.image_url && (
@@ -91,16 +114,18 @@ const ContributedSituations: React.FC = () => {
                   />
                 </Box>
               )}
+              {/* Comment & Reaction Section */}
+              <CommentSection situationId={sit.id} />
             </Paper>
           ))}
         </Box>
       )}
       {/* Lightbox Dialog */}
       <Dialog open={!!openImageUrl} onClose={handleCloseImage} maxWidth="md">
-        <Box sx={{ position: 'relative', bgcolor: '#000' }}>
+        <Box sx={{ position: 'relative', bgcolor: 'background.paper' }}>
           <IconButton
             onClick={handleCloseImage}
-            sx={{ position: 'absolute', top: 8, right: 8, color: '#fff', zIndex: 2 }}
+            sx={{ position: 'absolute', top: 8, right: 8, color: 'text.primary', zIndex: 2 }}
           >
             <CloseIcon />
           </IconButton>

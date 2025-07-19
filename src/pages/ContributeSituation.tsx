@@ -7,12 +7,11 @@ interface Topic {
   name: string;
 }
 
-// Hàm upload ảnh lên Cloudinary
 const uploadToCloudinary = async (file: File): Promise<string> => {
-  const url = 'https://api.cloudinary.com/v1_1/duqmsoxk4/image/upload'; // Thay <cloud_name> của bạn
+  const url = 'https://api.cloudinary.com/v1_1/duqmsoxk4/image/upload';
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('upload_preset', 'emotional'); // Thay <upload_preset> của bạn
+  formData.append('upload_preset', 'emotional'); 
   const res = await fetch(url, {
     method: 'POST',
     body: formData,
@@ -63,15 +62,36 @@ const ContributeSituation: React.FC = () => {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: '#f9f6f2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Quicksand, Nunito, Arial, sans-serif' }}>
-      <Paper elevation={4} sx={{ p: 4, maxWidth: 480, width: '100%', borderRadius: 4 }}>
-        <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }} align="center">
+    <Box sx={{ 
+      minHeight: '100vh', 
+      bgcolor: 'background.default', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      fontFamily: 'Quicksand, Nunito, Arial, sans-serif' 
+    }}>
+      <Paper elevation={4} sx={{ 
+        p: 4, 
+        maxWidth: 480, 
+        width: '100%', 
+        borderRadius: 4,
+        bgcolor: 'background.paper'
+      }}>
+        <Typography 
+          variant="h5" 
+          sx={{ 
+            fontWeight: 700, 
+            mb: 2,
+            color: 'text.primary'
+          }} 
+          align="center"
+        >
           Đóng góp tình huống mới
         </Typography>
         <form onSubmit={handleSubmit}>
           <TextField
             select
-            label="Chủ đề"
+            label="Chủ đề *"
             value={topicId}
             onChange={e => setTopicId(e.target.value)}
             fullWidth
@@ -83,7 +103,7 @@ const ContributeSituation: React.FC = () => {
             ))}
           </TextField>
           <TextField
-            label="Nội dung tình huống"
+            label="Nội dung tình huống *"
             value={context}
             onChange={e => setContext(e.target.value)}
             fullWidth
@@ -93,7 +113,7 @@ const ContributeSituation: React.FC = () => {
             sx={{ mb: 2 }}
           />
           <TextField
-            label="Câu hỏi mở cho tình huống"
+            label="Câu hỏi mở cho tình huống *"
             value={question}
             onChange={e => setQuestion(e.target.value)}
             fullWidth
